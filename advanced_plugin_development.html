@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport"
+          content="width=device-width, user-scalable=no, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0">
+    <meta http-equiv="X-UA-Compatible" content="ie=edge">
+    <title>Advanced plugin development</title>
+    <link rel="stylesheet" href="styles/vs.css">
+    <script src="highlight.pack.js"></script>
+    <script>hljs.initHighlightingOnLoad();</script>
+    <link href="styles/bootstrap-5.2.3-dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-rbsA2VBKQhggwzxH7pPCaAqO46MgnOM80zW1RWuH61DGLwZJEdK2Kadq2F9CUG65" crossorigin="anonymous">
+    <script src="styles/bootstrap-5.2.3-dist/js/bootstrap.bundle.min.js" integrity="sha384-kenU1KFdBIe4zVF0s0G1M5b4hcpxyD9F7jL+jjXkk+Q2h455rYXK/7HAuoJl+0I4" crossorigin="anonymous"></script>
+</head>
+<body class="bg-secondary text-dark fw-bolder fs-5">
+<div class="container justify-content-center text-start">
+<h1 class="fw-bold text-center">Расширенная разработка плагинов</h1>
+<h2 class="fw-bolder">Некоторые вызовы функций ограничены только инициализацией.</h2>
+<p>Функция Memory.WriteHook возможна только во время метода Initialize плагина. Причина этого в том, что мы можем избежать использования блокировки каждый раз, когда вводится хук. Это также позволяет пользователю видеть при запуске приложения, какие плагины устанавливают конфликтующие хуки и несовместимы друг с другом.</p>
+<h2 class="fw-bolder">Порядок загрузки плагинов</h2>
+<p>Порядок загрузки плагинов по умолчанию находится в алфавитном порядке файлов DLL. Однако автор плагина может отложить инициализацию своего плагина на потом, вернув false в методе Initialize. Если вы хотите инициализировать перед другим плагином, в настоящее время нет другого способа, кроме как переименовать ваш файл DLL во что-то, что будет сначала сортироваться в алфавитном порядке.</p>
+<h2 class="fw-bolder">Использование файла конфигурации</h2>
+<p>Если вы хотите добавить файл конфигурации для вашего плагина, вам нужно объявить:</p>
+<pre><code class="cs">public Tools.ConfigFile Config
+{
+    get;
+    private set;
+}</code></pre>
+<p>Он не обязательно должен находиться в вашем основном классе плагинов, но вы можете поместить его туда. Затем в методе Initialize плагина сделайте следующее:</p>
+<pre><code class="cs">this.Config = new Tools.ConfigFile("MyPlugin");
+this.Config.AddSetting("My.Setting1", new Tools.Value((int)123), "The name of my setting", "The description of this setting", Tools.ConfigEntryFlags.None);
+this.Config.AddSetting("My.Setting2", new Tools.Value(true), "The name of the other setting", "The description of this other setting", Tools.ConfigEntryFlags.None);
+this.Config.AddSetting("My.Setting3", new Tools.Value("abc"), "The name of third setting", "Description of third setting", Tools.ConfigEntryFlags.None);
+if(this.Config.Load())
+{
+    // Loaded from file ok ...
+}
+else
+{
+    // File was missing or something else? We should probably save to create a new file.
+    this.Config.Save();
+}
+
+var value = this.Config.GetValue("My.Setting1");
+if(value == null) // Not registered? Maybe you typed the keyword wrong.
+{
+
+}
+else
+{
+    int intValue = 0;
+    if(!value.TryToInt32(out intValue)) // Couldn't convert to int for some reason.
+    {
+        // ... ?
+    }
+    else
+    {
+        // My.Setting1 is in intValue
+    }
+}</code></pre>
+<p>Если имя вашей DLL MyPlugin.dll, тогда вы должны указать «MyPlugin» в качестве значения в конструкторе файла конфигурации. Тогда имя файла конфигурации будет выглядеть так:</p>
+<pre><code class="plaintext">\Data\NetScriptFramework\Plugins\MyPlugin.config.txt</code></pre>
+<p>Было бы отлично, если бы ваша DLL и файл конфигурации имели одно и то же имя, потому что тогда пользователю не нужно искать в каталоге ваш файл конфигурации или пытаться выяснить, конфигурацию какого плагина он сейчас просматривает. Это может стать особенно проблематичным, если установлено много плагинов.</p>
+<p>Файл конфигурации сначала инициализируется с помощью конструктора, затем вы добавляете настройки со значениями по умолчанию, затем пытаетесь загрузить. Если загрузка не удалась, параметры остаются со значениями по умолчанию, и вы можете вызвать метод Save, чтобы убедиться, что файл существует и действителен.</p>
+<p>Позже вы можете запросить значения конфигурации с помощью GetValue. Файл конфигурации открывается только один раз в методе Load, поэтому нет необходимости кэшировать значения конфигурации, однако вы все равно можете это сделать, если вам это удобно.</p>
+<p>Когда вы разрабатываете свой мод, может показаться привлекательным не включать файл конфигурации по умолчанию при выпуске вашего плагина, потому что он все равно будет сгенерирован, но может быть хорошей идеей включить его в любом случае, потому что, если пользователь использует менеджер модов с виртуальной файловой системой, файл оказывается в каталоге перезаписи, и они могут его не найти, или они могут захотеть настроить ваш плагин перед запуском игры. Чтобы получить файл конфигурации по умолчанию, уже отформатированный должным образом, все, что вам нужно сделать, это удалить файл конфигурации, а затем запустить игру после того, как вы добавили часть кода if !Load then Save.</p>
+<h2 class="fw-bolder">Использование других плагинов в качестве зависимостей</h2>
+<p>Можно использовать другой плагин в качестве зависимости, если вы хотите использовать их зарегистрированные события или они предлагают некоторые другие функции библиотеки, полезные для вас. Для этого все, что вам нужно сделать, это добавить его в качестве ссылки в проект вашего плагина. Затем во время выполнения вы можете получить экземпляр плагина следующим образом:</p>
+<pre><code class="cs">Plugin otherPluginBase = PluginManager.GetPlugin("otherPluginKey"); // &lt;- the key they declared in their Plugin class
+OtherPlugin otherPluginTyped = PluginManager.GetPlugin&lt;OtherPlugin&gt;(); // &lt;- key is not needed if you include a type
+OtherPlugin otherPluginTyped2 = PluginManager.GetPlugin("otherPluginKey") as OtherPlugin; // also ok
+List&lt;Plugin&gt; allPlugins = PluginManager.GetPlugins(); // get a list of all installed .NET plugins</code></pre>
+<p>Из-за того, как .NET разрешает зависимости, также может быть возможно иметь необязательную зависимость:</p>
+<pre><code class="cs">Plugin otherPluginBase = PluginManager.GetPlugin("otherPluginKey");
+if (otherPluginBase != null)
+    SomeFunc();
+
+void SomeFunc(Plugin p)
+{
+    var op = p as OtherPlugin;
+    op.TheirFunc();
+}</code></pre>
+<p>Зависимость не пытается разрешиться, пока вы не введете метод SomeFunc, и вы войдете, только если установлен другой плагин. Однако это не проверено и может работать или не работать, будьте осторожны и убедитесь, что вы сначала всесторонне протестировали, прежде чем идти по этому пути.</p>
+<h2 class="fw-bolder">Использование другой библиотеки без плагинов в качестве зависимости</h2>
+<p>Вы можете использовать любую DLL, независимо от того, является ли она родной или управляемой как зависимость, однако, когда вы помещаете их в путь /Data/NetScriptFramework/Plugins/Lib/, они не будут пытаться загружаться как плагины сами по себе. Вам ничего не нужно делать с вашей стороны в плагине, чтобы загрузить этот путь. Фреймворк попытается автоматически искать в этом каталоге при загрузке DLL.</p>
+<h2 class="fw-bolder">Создание независимых от версии плагинов</h2>
+<p>Одним из преимуществ языка .NET является то, что большинство ваших подключаемых модулей могут быть полностью независимыми от версии. Если вы используете только игровую библиотеку и не используете вручную какие-либо адреса памяти в своем плагине, тогда ваш плагин будет независимым от версии, когда игра обновляется до новой версии, только сам фреймворк (игровая библиотека) должен обновляться. Ваш плагин DLL будет работать без перекомпиляции и правок с обеими версиями игры.</p>
+<p>Однако бывают случаи, когда вы захотите вручную создать перехватчик кода по определенному адресу. Есть еще способ сделать эту версию независимой с помощью библиотеки отладки игры. Первое, что вам нужно сделать, это узнать идентификатор функции, не зависящий от версии:</p>
+<pre><code class="cs">var debug = CrashLog.Debug;
+if(debug == null)
+{
+    // Debug library is not loaded, we can't do it :(
+}
+else
+{
+    IntPtr myDesiredHookAddress = new IntPtr(0x1403E1659).FromBase();
+    var myDesiredFunction = debug.GetFunctionInfo(myDesiredHookAddress, true);
+    if(myDesiredFunction == null)
+    {
+        // Uhh this function was not found at all in the debug library ?
+    }
+    else
+    {
+        ulong myDesiredHookAddress_u = Main.Is64Bit ? myDesiredHookAddress.ToUInt64() : myDesiredHookAddress.ToUInt32();
+        ulong versionIndependentId = myDesiredFunction.Id;
+        ulong myDesiredHookOffset = myDesiredHookAddress_u - (debug.BaseOffset + myDesiredFunction.Begin);
+        // I should hook at debug.BaseOffset + fn[versionIndependentId].Base + myDesiredHookOffset
+    }
+}</code></pre>
+<p>Теперь, когда у вас есть смещение в функции и идентификатор, не зависящий от версии, вы можете подключиться следующим образом:</p>
+<pre><code class="cs">ulong versionIndependentId = ...; // Constant
+ulong myDesiredHookOffset = ...; // Constant
+var fn = debug.GetFunctionInfo(versionIndependentId);
+if(fn == null)
+{
+    // Bad fail!
+}
+Memory.WriteHook(new HookParameters()
+{
+    Address = new IntPtr((long)(debug.BaseOffset + fn.Begin + myDesiredHookOffset))</code></pre>
+<p>Вы также можете проверить, какие байты присутствовали по этому адресу, нет никакой гарантии, что тело функции осталось прежним, хотя обычно вероятность его изменения невелика.</p>
+<h2 class="fw-bolder">Проверьте различные версии вещей</h2>
+<p>Вы можете проверить версии следующим образом:</p>
+<pre><code class="cs">int myPluginVersion = this.Version;
+int someOtherPluginVersion;
+var otherPlugin = PluginManager.GetPlugin("otherPlugin");
+if (otherPlugin != null)
+    someOtherPluginVersion = otherPlugin.Version;
+int mainFrameworkVersion = Main.FrameworkVersion;
+var game = Main.Game;
+if(game != null) // Game library is loaded
+{
+    string shortName = game.ShortName; // SkyrimSE
+    IReadOnlyList&lt;int&gt; executableVersion = game.GameVersion; // { 1, 5, 53, 0 } (always 4 integers)
+    int libraryVersion = game.LibraryVersion; // 1
+
+    // Oops maybe I don't want to load.
+    if(libraryVersion &lt; 3)
+        throw new ArgumentException("MyPlugin requires game library version 3 or higher.");
+}</code></pre>
+<h2 class="fw-bolder">Дебаг</h2>
+<p>Вы можете отладить свой плагин, подключив визуальную студию к игровому процессу и установив точки останова.</p>
+<p>Иногда вам может понадобиться отладить собственные типы или код, вы можете многое сделать, чтобы помочь с этим, особенно если загружена библиотека отладки:</p>
+<pre><code class="cs">/*
+.text:000000014094A6D6  mov     ebp, edx
+.text:000000014094A6D8  call    sub_1403E1640   &lt;&lt;&lt; want to debug this call?
+.text:000000014094A6DD  movsxd  rdi, eax
+*/
+Memory.WriteHook(new HookParameters()
+{
+    Address = new IntPtr(0x14094A6D8).FromBase(),
+    IncludeLength = 5,
+    ReplaceLength = 5,
+    Before = ctx =&gt;
+    {
+        Main.Log.AppendLine("Calling 1403E1640 with arguments (" + ctx.CX.ToHexString() + " = " + NativeCrashLog.GetValueInfo(ctx.CX) + ")");
+    },
+    After = ctx =&gt;
+    {
+        Main.Log.AppendLine("Return value is (" + ctx.AX.ToHexString() + " = " + NativeCrashLog.GetValueInfo(ctx.AX) + ")");
+    }
+});</code></pre>
+<p>При этом будет использоваться система идентификации значений журнала сбоев. Если это известный тип, он скажет имя типа, если это строка, она будет считывать строку, если это указатель на допустимую область памяти, но не в VTable, он скажет void*, если это значение или число с плавающей запятой он попытается сказать это значение.</p>
+<p>Иногда вам может понадобиться еще больше информации:</p>
+<pre><code class="cs">Memory.WriteHook(new HookParameters()
+{
+    Address = new IntPtr(0x14094A6D8).FromBase(),
+    IncludeLength = 5,
+    ReplaceLength = 5,
+    Before = ctx =&gt;
+    {
+        Main.WriteNativeCrashLog(ctx, int.MinValue, "Data/NetScriptFramework/Plugins/MyPlugin_debug.txt");
+    }
+});</code></pre>
+<p>Это запишет журнал сбоев для этого места, но после этого все равно продолжит выполнение.</p>
+    <div class="d-flex justify-content-between">
+        <button type="button" class="btn btn btn-dark text-end"><a href="using_the_framework.html">Назад</a></button>
+    </div>
+</div>
+</body>
+</html>
+

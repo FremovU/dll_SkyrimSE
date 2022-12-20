@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+	<meta charset="UTF-8">
+	<meta name="viewport"
+		  content="width=device-width, user-scalable=no, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0">
+	<meta http-equiv="X-UA-Compatible" content="ie=edge">
+	<title>Создание первого плагина</title>
+	<link rel="stylesheet" href="styles/vs.css">
+	<script src="highlight.pack.js"></script>
+	<script>hljs.initHighlightingOnLoad();</script>
+	<link href="styles/bootstrap-5.2.3-dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-rbsA2VBKQhggwzxH7pPCaAqO46MgnOM80zW1RWuH61DGLwZJEdK2Kadq2F9CUG65" crossorigin="anonymous">
+	<script src="styles/bootstrap-5.2.3-dist/js/bootstrap.bundle.min.js" integrity="sha384-kenU1KFdBIe4zVF0s0G1M5b4hcpxyD9F7jL+jjXkk+Q2h455rYXK/7HAuoJl+0I4" crossorigin="anonymous"></script>
+</head>
+<body class="bg-secondary text-dark fw-bolder fs-5">
+<div class="container justify-content-center text-start">
+<h1 class="fw-bold text-center">Создание первого плагина</h1>
+<h2 class="fw-bolder">Создание и настройка проекта в Visual Studio</h2>
+<p> <span class="fw-bolder">Шаг 1:</span> В Visual Studio выберите «Новый проект» под выбранным вами языком .NET и убедитесь, что это тип файла DLL. В этих уроках я буду использовать C# и игру Skyrim Special Edition в качестве примера.</p>
+<p> <span class="fw-bolder">Шаг 2:</span> После создания проекта выберите «Ссылки->Добавить ссылку->Обзор» и выберите два файла с именами «NetScriptFramework.dll» и «NetScriptFramework.Skyrim.dll», если вы работаете над игрой без библиотеки типов. или вам не нужно использовать библиотеку типов, тогда вторую ссылку следует пропустить.</p>
+<p> <span class="fw-bolder">Шаг 3:</span> Этот шаг необходим только в том случае, если вы используете C++/CLI и приложение является 64-разрядным — перейдите в «Build-> Configuration Manager-> Active Solution Platform» и выберите x64.</p>
+<p> <span class="fw-bolder">Шаг 4:</span> Создайте новый класс и назовите его MyTestPlugin (или как угодно) и сделайте так, чтобы он наследовал класс NetScriptFramework.Plugin.</p>
+<p> <span class="fw-bolder">Шаг 5:</span> Класс должен переопределить три свойства с именами Plugin.Name.get, Plugin.Key.get, Plugin.Version.get, но вы также захотите переопределить метод Plugin.Initialize. На этом этапе у вас должно получиться что-то вроде этого:</p>
+<pre><code class="cs">class MyTestPlugin : Plugin
+{
+	public override string Key
+	{
+		get
+		{
+			return "mytest";
+		}
+	}
+
+	public override string Name
+	{
+		get
+		{
+			return "My test plugin";
+		}
+	}
+
+	public override int Version
+	{
+		get
+		{
+			return 1;
+		}
+	}
+
+	protected override bool Initialize(bool loadedAny)
+	{
+		return true;
+	}
+}</code></pre>
+<p>Это все, что требуется для загрузки плагина. Попробуйте это, собрав проект и поместив DLL в каталог \Data\NetScriptFramework\Plugins\ (или куда-нибудь еще, если вы изменили путь к плагинам). Запустите приложение и проверьте файл журнала, ваш плагин должен был загрузиться со следующим сообщением:</p>
+<pre><code class="plaintext text-bg-dark text-start">[17 Nov 2018 11:08:35.998] Checking file "MyProjectName.dll"...
+[17 Nov 2018 11:08:36.006] Plugin found and loaded.
+[17 Nov 2018 11:08:36.019] Finished loading 1 plugin.</code></pre>
+<p>Если плагин не загрузился, проверьте, не появляется ли сообщение об ошибке. Если нет сообщений и даже не получена часть «Проверка файла», значит, DLL плагина была помещена в не тот каталог.</p>
+<h2 class="fw-bolder">Инициализация плагина</h2>
+<p>Единственный раз, когда фреймворк будет что-то делать с вашим плагином, это когда он инициализируется, что означает, что вы должны либо написать все свои хуки, зарегистрироваться для событий и выполнить редактирование памяти (в зависимости от того, что будет делать ваш плагин) в это время. Если вы ничего не сделаете в функции Initialize, ваш плагин вообще ничего не сделает. Если ваш плагин зависит от другого плагина, который нужно загрузить первым, вы можете вернуть false в функции Initialize, чтобы сообщить фреймворку, что вы пока отказываетесь от инициализации, тогда фреймворк попытается сначала инициализировать другие плагины и вернуться к вашему плагину. Если во время прохода не было инициализировано ни одного плагина, он снова вызовет Initialize с аргументомloadAny, установленным в false. Если на этом этапе не инициализировано ни одного плагина, приложение сообщит об ошибке и завершит работу. Вы можете проверить, инициализирован ли другой плагин следующим образом:</p>
+<pre><code class="cs">Plugin otherPlugin = NetScriptFramework.PluginManager.GetPlugin("keyOfAnotherPlugin");
+if (otherPlugin == null) // Other plugin is not installed at all
+    return false;
+if (!otherPlugin.IsInitialized) // Other plugin is not initialized yet
+    return false;
+// Other plugin has been initialized already so we can use it.</code></pre>
+<p>Если вы сослались на другой плагин как на зависимость, вы также можете попытаться привести другой файл плагина к более высокому типу и напрямую использовать его методы и свойства.</p>
+<p>Вы никогда не должны выполнять инициализацию или другие действия в конструкторе вашего плагина! Лучше оставить весь код методу Initialize и даже не объявлять конструктор.</p>
+<p>Подробнее о том, что вы можете сделать в методе Initialize, будет рассказано в следующих руководствах.</p>
+<h2 class="fw-bolder">Выпуск плагина</h2>
+<p>Когда вы выпускаете плагин для других, вам нужно только включить DLL вашего плагина. Не включайте файлы фреймворка. Если ваш плагин зависит от чужого плагина, не включайте его, если у вас нет его разрешения. Вместо этого отметьте это как требование. Если ваш подключаемый модуль зависит от сторонних библиотек, на которые вы ссылаетесь или используете с DllImport, но сами по себе не являются подключаемыми модулями, они должны находиться в каталоге \Data\NetScriptFramework\Plugins\Lib\. В этом каталоге будут автоматически выполняться поиски любых библиотек DLL при разрешении зависимостей. Например, если DLL вашего плагина называется MyPlugin.dll, а ваш проект имеет ссылку или зависит от библиотеки JSON.NET, окончательное содержимое файла архива выпуска должно быть таким:</p>
+<pre><code class="plaintext">\NetScriptFramework\Plugins\MyPlugin.dll
+\NetScriptFramework\Plugins\MyPlugin.pdb (optional)
+\NetScriptFramework\Plugins\Lib\Newtonsoft.Json.dll
+\NetScriptFramework\Plugins\Lib\Newtonsoft.Json.pdb (optional)</code></pre>
+<p>Включение символов отладки (файл PDB) может быть полезным, потому что, если есть необработанные исключения или проблемы с вашим плагином, ваши пользователи могут публиковать журналы сбоев, которые будут для вас более полезными, чем без файла символов.</p>
+	<div class="d-flex justify-content-between">
+		<button type="button" class="btn btn btn-dark text-end"><a href="introduction.html">Назад</a></button>
+		<button type="button" class="btn btn btn-dark text-start"><a href="using_the_game_library.html">Вперёд</a></button>
+	</div>
+</div>
+</body>
+</html>
+
+

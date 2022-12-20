@@ -1,0 +1,255 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport"
+          content="width=device-width, user-scalable=no, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0">
+    <meta http-equiv="X-UA-Compatible" content="ie=edge">
+    <title>Использование фреймворка</title>
+    <link rel="stylesheet" href="styles/vs.css">
+    <script src="highlight.pack.js"></script>
+    <script>hljs.initHighlightingOnLoad();</script>
+    <link href="styles/bootstrap-5.2.3-dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-rbsA2VBKQhggwzxH7pPCaAqO46MgnOM80zW1RWuH61DGLwZJEdK2Kadq2F9CUG65" crossorigin="anonymous">
+    <script src="styles/bootstrap-5.2.3-dist/js/bootstrap.bundle.min.js" integrity="sha384-kenU1KFdBIe4zVF0s0G1M5b4hcpxyD9F7jL+jjXkk+Q2h455rYXK/7HAuoJl+0I4" crossorigin="anonymous"></script>
+</head>
+<body class="bg-secondary text-dark fw-bolder fs-5">
+<div class="container justify-content-center text-start">
+<h1 class="text-center fw-bold">Использование фреймворка</h1>
+<h2 class="fw-bolder">Прямой доступ к памяти</h2>
+<p>Класс NetScriptFramework.Memory содержит множество полезных функций для чтения и записи из памяти. Вот некоторые примеры:</p>
+<pre><code class="cs">var ptr = new IntPtr(0x1234);
+int value = 666;
+
+Memory.WriteInt32(ptr, value); // Запись в доступную для записи память.
+value = Memory.ReadInt32(ptr); // Чтение из читаемой памяти.
+
+Memory.WriteInt32(ptr, value, true); // Запись в постоянную память.
+value = Memory.ReadInt32(ptr, true); // Читать из памяти, где у нас нет доступа для чтения.
+
+value = Memory.WriteInterlockedInt32(ptr, value); // Write to writable memory as an atomic operation and return the previous value.
+value = Memory.ReadInterlockedInt32(ptr); // Read from readable memory as an atomic operation.
+value = Memory.InterlockedIncrement32(ptr); // Increment writable memory as an atomic operation.
+
+using (var alloc = Memory.Allocate(0x20)) // Allocate a memory region with size of 0x20
+{
+    Memory.WriteInt32(alloc.Address, 1);
+    Memory.WriteInt32(alloc.Address + 4, 2);
+} // Free the allocated memory.
+
+using (var alloc = Memory.Allocate(0x20, 0x40, true)) // Allocate memory region with size of 0x20 and alignment of 0x40 and make it have code executable access.
+{
+    ptr = alloc.Address;
+    alloc.Pin(); // Prevent the memory region from being freed when the allocation instance is disposed.
+} // Memory region is NOT freed.
+
+using (var alloc = Memory.AllocateString("abc", false)) // Allocate a string to be used in C
+{
+    ptr = alloc.Address; // char*
+    string val = Memory.ReadString(ptr, false); // read the string back
+} // String underlying allocation is deleted and ptr is not pointing to valid memory.
+
+ptr = new IntPtr(0x1); // Make it bad pointer.
+if(Memory.IsValidRegion(ptr, 0x10, true, false, false)) // Check if the pointer points to a valid memory region where we could read 0x10 bytes continuously
+{
+
+}
+// ptr is bad:
+try
+{
+    value = Memory.ReadInt32(ptr);
+}
+catch(MemoryAccessException)
+{
+    // oops ... but it's fine because we handled it.
+}
+
+ptr = new IntPtr(0x140194420); // static TESForm* (TESForm::LookupFormById*)(uint32 id) in 1.5.53.0 but this is the base address, it is not correct to use it directly as the module is relocated
+ptr = ptr.FromBase(); // now it points to the actual address of the function, for example 7FFF324982390 or something
+
+IntPtr resultPtr = Memory.InvokeCdecl(ptr, 0x14); // Invoke native function at address "ptr" with argument 0x14, resultPtr will catch what's in AX register at the end
+// What if result was a boolean instead of a pointer?
+bool resultBool = resultPtr.ToBool();
+// What if result was a float and in xmm0 register instead of AX?
+double resultF = Memory.InvokeCdeclF(new IntPtr(0x140001234).FromBase(), 1, true, 3.0, new IntPtr(0x123)); // invoke function at 0x140001234 (as said by IDA) with arguments of (int64)1&lt;CX&gt;, (char)1&lt;DX&gt;, (double)3.0&lt;xmm2&gt;, (void*)0x123&lt;R9&gt;</code></pre>
+<h2>Вы также можете подключить собственный код</h2>
+<p>Давайте напишем простой хук и посмотрим, что получится:</p>
+<pre><code class="cs">/*
+.text:0000000140314DF0    mov   r11, rsp
+.text:0000000140314DF3    push  rbx                     &lt;&lt;&lt;
+.text:0000000140314DF4    sub   rsp, 70h
+.text:0000000140314DF8    lea   rax, [r11-24h]
+.text:0000000140314DFC    mov   [rsp+78h+var_24], 0
+*/
+Memory.WriteHook(new HookParameters()
+{
+    Address = new IntPtr(0x140314DF3).FromBase(),
+    IncludeLength = 5,
+    ReplaceLength = 5,
+    Before = ctx =&gt;
+    {
+        IntPtr cx = ctx.CX;
+        string cx_str = cx.ToHexString();
+        string cx_identify = NativeCrashLog.GetValueInfo(cx);
+        Main.Log.AppendLine("Yay I'm in " + ctx.Hook.ToHexString() + " now, this is in CX register: " + cx_str + " (" + cx_identify + ")");
+        // Lets change it to something else:
+        ctx.CX = new IntPtr(0x123);
+    }
+});
+/*
+.text:0000000140314DF0    mov   r11, rsp
+{
+    Our .NET code above is here.
+}
+.text:0000000140314DF3    push  rbx
+.text:0000000140314DF4    sub   rsp, 70h
+.text:0000000140314DF8    lea   rax, [r11-24h]
+.text:0000000140314DFC    mov   [rsp+78h+var_24], 0
+*/</code></pre>
+<p>Вы также можете подключить до и после:</p>
+<pre><code class="cs">Memory.WriteHook(new HookParameters()
+{
+    Address = new IntPtr(0x140314DF3).FromBase(),
+    IncludeLength = 5,
+    ReplaceLength = 5,
+    Before = ctx =&gt;
+    {
+        // stuff
+    },
+    After = ctx =&gt;
+    {
+        // other stuff
+    }
+});
+/*
+.text:0000000140314DF0    mov   r11, rsp
+{
+    stuff
+}
+.text:0000000140314DF3    push  rbx
+.text:0000000140314DF4    sub   rsp, 70h
+{
+    other stuff
+}
+.text:0000000140314DF8    lea   rax, [r11-24h]
+.text:0000000140314DFC    mov   [rsp+78h+var_24], 0
+*/</code></pre>
+<p>Что такое длина включения и что произойдет, если мы изменим ее на другую величину?</p>
+<pre><code class="cs">Memory.WriteHook(new HookParameters()
+{
+    Address = new IntPtr(0x140314DF3).FromBase(),
+    IncludeLength = 1, // Only include 1 bytes of code
+    ReplaceLength = 5,
+    Before = ctx =&gt;
+    {
+        // stuff
+    }
+});
+/*
+.text:0000000140314DF0    mov   r11, rsp
+{
+    stuff
+}
+.text:0000000140314DF3    push  rbx
+.text:0000000140314DF4    nop
+.text:0000000140314DF5    nop
+.text:0000000140314DF6    nop
+.text:0000000140314DF7    nop
+.text:0000000140314DF8    lea   rax, [r11-24h]
+.text:0000000140314DFC    mov   [rsp+78h+var_24], 0
+*/</code></pre>
+<p>Вот что произойдет, если вы измените длину замены (она должна быть не менее 5!), а также что, если я хочу иногда пропустить выполнение включенного кода:</p>
+<pre><code class="cs">Memory.WriteHook(new HookParameters()
+{
+    Address = new IntPtr(0x140314DF3).FromBase(),
+    IncludeLength = 9,
+    ReplaceLength = 9,
+    Before = ctx =&gt;
+    {
+        // hmm let's skip executing the included assembly code sometimes?
+        if (Tools.Randomizer.NextInt(0, 100) &lt; 50)
+            ctx.Skip();
+    },
+    After = ctx =&gt;
+    {
+        // other stuff
+    }
+});
+/*
+.text:0000000140314DF0    mov   r11, rsp
+{
+    stuff
+}
+.text:0000000140314DF3    push  rbx             &lt;&lt;&lt; Sometimes skip this
+.text:0000000140314DF4    sub   rsp, 70h        &lt;&lt;&lt; Sometimes skip this
+.text:0000000140314DF8    lea   rax, [r11-24h]  &lt;&lt;&lt; Sometimes skip this
+{
+    other stuff
+}
+.text:0000000140314DFC    mov   [rsp+78h+var_24], 0
+*/</code></pre>
+<p>Что, если я хочу перейти в какое-то произвольное место при выходе из хука и после запуска включенного кода?</p>
+<pre><code class="cs">// Lets go somewhere completely different after the hook:
+Memory.WriteHook(new HookParameters()
+{
+    Address = new IntPtr(0x140314DF3).FromBase(),
+    IncludeLength = 5,
+    ReplaceLength = 5,
+    Before = ctx =&gt;
+    {
+        // After running the included code and exiting the hook we will instead go here.
+        ctx.IP = new IntPtr(0x140314E3A).FromBase();
+    }
+});</code></pre>
+<p>Memory.WriteHook не позволяет нескольким хукам конфликтовать друг с другом (перекрываться):</p>
+<pre><code class="cs">var p = new HookParameters()
+{
+    Address = new IntPtr(0x140314DF3).FromBase(),
+    IncludeLength = 5,
+    ReplaceLength = 5,
+    Before = ctx =&gt;
+    {
+
+    }
+};
+Memory.WriteHook(p); // Fine.
+Memory.WriteHook(p); // Oops crash with error message, someone else already placed a hook that would conflict with mine.</code></pre>
+<p>Ограничения перехватывающего кода</p>
+<pre><code class="cs">.text:0000000140314E41  jnz short loc_140314E49   &lt;&lt;&lt;
+.text:0000000140314E43  add rsp, 70h
+.text:0000000140314E47  pop rbx</code></pre>
+<p>Не допускается перехват в указанном месте, если для параметра IncludeLength задано ненулевое значение, поскольку это код, зависящий от местоположения, включенный код не может выполняться в другом месте. Другие ситуации, в которых хук кода не может быть помещен с IncludeLength как ненулевым: любой тип переходов с использованием регистра IP (например, mov rax, [rip+0x1234]), в любом месте, где IDA говорит, что он обращается к статическому адресу, например мов ракс, dword_1234. Для rel-вызовов сделано исключение (если IDA говорит, что вызов sub_1234 разрешен, если вы начинаете перехватчик именно в этом месте).</p>
+<p>Что, если я хочу каким-то образом написать собственный ассемблерный код?</p>
+<pre><code class="cs">// Precompile your code at: https://defuse.ca/online-x86-assembler.htm
+byte[] myPrecompiledAssemblyCode = new byte[] { 0x48, 0x31, 0xC0 };
+IntPtr myCodeAddress;
+using (var alloc = Memory.Allocate(myPrecompiledAssemblyCode.Length + 0x20, 0, true)) // Allocate your code size + 0x20 (for jump back), alignment not important, and must have execution access
+{
+    myCodeAddress = alloc.Address; // This is where we jump later.
+    alloc.Pin(); // Make sure to pin so memory does not get freed after.
+    Memory.WriteBytes(alloc.Address, myPrecompiledAssemblyCode, true);
+
+    // Write the following code to jump back without disturbing any registers:
+    /*
+    push rax
+    push rax
+    mov rax, jumpBackAddress
+    xchg [rsp+8], rax
+    pop rax
+    ret
+    */
+    IntPtr jumpBackAddress = new IntPtr(0x1234);
+    byte[] jumpBack = new byte[] { 0x50, 0x50, 0x48, 0xB8 };
+    Memory.WriteBytes(alloc.Address + myPrecompiledAssemblyCode.Length, jumpBack);
+    Memory.WriteUInt64(alloc.Address + myPrecompiledAssemblyCode.Length + jumpBack.Length, jumpBackAddress.FromBase().ToUInt64(), true);
+    byte[] moreBack = new byte[] { 0x48, 0x87, 0x44, 0x24, 0x08, 0x58, 0xC3 };
+    Memory.WriteBytes(alloc.Address + myPrecompiledAssemblyCode.Length + jumpBack.Length + 8, moreBack, true);
+}
+// Now there's my assembly code with jump back at myCodeAddress, you can write a jump there however you want.</code></pre>
+    <div class="d-flex justify-content-between">
+        <button type="button" class="btn btn btn-dark text-end"><a href="using_the_game_library.html">Назад</a></button>
+        <button type="button" class="btn btn btn-dark text-start"><a href="advanced_plugin_development.html">Вперёд</a></button>
+    </div>
+</div>
+</body>
+</html>
+

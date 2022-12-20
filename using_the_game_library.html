@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport"
+          content="width=device-width, user-scalable=no, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0">
+    <meta http-equiv="X-UA-Compatible" content="ie=edge">
+    <title>Использование игровой библиотеки</title>
+    <link rel="stylesheet" href="styles/vs.css">
+    <script src="highlight.pack.js"></script>
+    <script>hljs.initHighlightingOnLoad();</script>
+    <link href="styles/bootstrap-5.2.3-dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-rbsA2VBKQhggwzxH7pPCaAqO46MgnOM80zW1RWuH61DGLwZJEdK2Kadq2F9CUG65" crossorigin="anonymous">
+    <script src="styles/bootstrap-5.2.3-dist/js/bootstrap.bundle.min.js" integrity="sha384-kenU1KFdBIe4zVF0s0G1M5b4hcpxyD9F7jL+jjXkk+Q2h455rYXK/7HAuoJl+0I4" crossorigin="anonymous"></script>
+</head>
+<body class="bg-secondary text-dark fw-bolder fs-5">
+<div class="container justify-content-center text-start ">
+<h1 class="text-center fw-bold">Использование игровой библиотеки</h1>
+<h2 class="fw-bolder">Как это работает?</h2>
+<p>Игровая библиотека или библиотека типов — это дополнительный файл, содержащий обертки для нативных типов и хуков. Открытые типы — это интерфейсы, которые имеют внутренние реализации, которые не являются открытыми. Пример класса Actor из Skyrim Special edition:</p>
+<pre><code class="cs">public interface Actor : TESObjectREFR, MagicTarget, ActorValueOwner, ActorState, BSTEventSink&lt;BSTransformDeltaEvent&gt;, BSTEventSink&lt;bhkCharacterMoveFinishEvent&gt;, IPostAnimationChannelUpdateFunctor</code></pre>
+<p>Этот интерфейс Актера наследует другие интерфейсы, обратите внимание на множественное наследование. Сам TESObjectREFR также наследует многие другие интерфейсы, как показано здесь:</p>
+<pre><code class="cs">public interface TESObjectREFR : TESForm, BSHandleRefObject, BSTEventSink&lt;BSAnimationGraphEvent&gt;, IAnimationGraphManagerHolder</code></pre>
+<p>Причина, по которой они являются интерфейсами, а не реальными классами, заключается в том, что язык .NET не допускает множественного наследования самих классов. В конце концов все объекты наследуют IMemoryObject и реализуются с использованием класса MemoryObject в качестве базового. Если у типа есть виртуальная таблица, он также наследует IVirtualObject и реализуется с помощью класса VirtualObject, который сам также наследует IMemoryObject. Класс объекта памяти и все, что его наследует, не содержит никаких других данных, кроме одного поля, в котором указан адрес в памяти, где находится тип. С этой точки зрения MemoryObject и все, что его наследует, является не чем иным, как реализацией/оболочкой указателя. Рассмотрим пример реализации типа NiRefObject из игровой библиотеки Skyrim Special Edition:</p>
+<pre><code class="cs">public interface NiRefObject : IVirtualObject
+{
+    void IncRef();
+    bool DecRef();
+}
+
+internal sealed class impl_NiRefObject : VirtualObject, NiRefObject
+{
+    public void IncRef()
+    {
+        var self = this.As&lt;NiRefObject&gt;();
+        Memory.InterlockedIncrement32(self.Address + 0x8, false);
+    }
+
+    public bool DecRef()
+    {
+        var self = this.As&lt;NiRefObject&gt;();
+        var result = Memory.InterlockedDecrement32(self.Address + 0x8, false);
+        if (result == 0)
+        {
+            self.InvokeVTableThisCall(0, 0x8);
+            return true;
+        }
+        return false;
+    }
+}
+
+// Later in game library initialize.
+RegisterType(modulePtr, "NiRefObject", typeof(NiRefObject), typeof(impl_NiRefObject), 16, new uint[] { 0x1E3A690 });</code></pre>
+<p>Методы IncRef и DecRef являются частью игры и не имеют ничего общего с фреймворком. Обратите внимание, что интерфейс является общедоступным, а реализация является внутренней. Оба типа должны быть зарегистрированы в игровой библиотеке, чтобы она знала, как создавать и преобразовывать типы. Дополнительные сведения об этом см. в документации IntelliSense по функции RegisterType.</p>
+<p>А пока давайте посмотрим на тип. Он наследуется от IVirtualObject, что означает наличие таблицы виртуальных функций. Любой тип, у которого он есть, должен быть преобразован с помощью метода IVirtualObject.As<>. По сути, это реализация dynamic_cast<>. Проверьте этот код:</p>
+<pre><code class="cs">TESObjectREFR obj = ...;
+Actor actor1 = obj as Actor; // This is wrong! TESObjectREFR is not necessarily created as Actor interface and may return null even if the cast itself could be valid (we don't know yet).
+Actor actor2 = obj.As&lt;Actor&gt;(); // This is correct. It will use dynamic_cast&lt;Actor*&gt; internally which will convert it to the appropriate interface assuming the cast is valid.</code></pre>
+<p>Если мы посмотрим на реализацию метода NiRefObject, то увидим, что он работает var self = this.As(); Это может показаться излишним, но на самом деле необходимо, потому что рассмотрим что-то вроде этого:</p>
+<pre><code class="cs">void SomeFunc(MagicTarget mt)
+{
+    // Do something with mt
+}
+
+Actor actor = ...;
+SomeFunc(actor); // Valid call because Actor inherits the MagicTarget interface</code></pre>
+<p>Причина, по которой это проблематично, заключается в том, что мы не можем быть уверены, что при работе с интерфейсом MagicTarget базовый адрес интерфейса правильный. Например, базовый адрес MagicTarget на самом деле не совпадает с базовым адресом Актера из-за множественного наследования, что делает приведение необходимым, пока существует тип, в котором унаследованный класс не находится в начале (смещение 0). Это важно только для разработчиков библиотек типов и должно обрабатываться внутри, поэтому авторам плагинов не нужно беспокоиться об этом, если только они не используют базовый адрес объекта вручную.</p>
+<p>Если мы хотим создать MemoryObject из адреса вручную, мы можем сделать это:</p>
+<pre><code class="cs">Actor actor1 = MemoryObject.FromAddress&lt;Actor&gt;(new IntPtr(0x1234));
+Actor actor2 = MemoryObject.FromAddressSafeCast&lt;Actor&gt;(new IntPtr(0x1234));</code></pre>
+<p>Оба допустимы, первый заставит адрес памяти стать типом Актера (если только переданный IntPtr не равен нулю). Второй попытается выполнить динамическое преобразование памяти в Актера, что может привести к сбою, например, если объект на самом деле является чем-то другим. Второй вариант возможен только в том случае, если у типа есть виртуальная таблица функций. Обычно второй вариант не нужен, если только вы не уверены, содержит ли память действительный объект или нет.</p>
+<p>Вы также можете вручную проверить, действителен ли только что созданный объект:</p>
+<pre><code class="cs">Actor actor = MemoryObject.FromAddress&lt;Actor&gt;(new IntPtr(0x1234));
+if(actor != null && actor.IsValid)
+{
+    // It's valid.
+}</code></pre>
+<p>Все типы IMemoryObject имеют свойство IsValid. Для типов с виртуальной таблицей он попытается снова выполнить динамическое приведение себя к самому себе, что будет допустимо только в том случае, если возвращаемое значение не равно нулю. Для обычных объектов он будет использовать VirtualQuery, чтобы проверить, является ли область памяти, на которую он указывает, действительной доступной для чтения памятью, по крайней мере, с размером типа.</p>
+<p>Сравнение IMemoryObject нельзя выполнить с помощью операторов == или !=, оно должно выполняться с помощью метода Equals, поскольку необходимо учитывать следующее:</p>
+<pre><code class="cs">var ptr = new IntPtr(0x1234);
+Actor actor1 = MemoryObject.FromAddress&lt;Actor&gt;(ptr);
+Actor actor2 = MemoryObject.FromAddress&lt;Actor&gt;(ptr);
+actor1 == actor2 // false
+actor1.Equals(actor2); // true</code></pre>
+<p>Когда объект создается, он всегда создает новый интерфейс, и операторы сравнения проверяют только экземпляр в среде выполнения .NET, но метод Equals проверяет, равен ли базовый адрес памяти. Это также означает, что вы должны быть немного осторожны при сравнении типов с множественным наследованием:</p>
+<pre><code class="cs">var ptr = new IntPtr(0x1234);
+Actor actor = MemoryObject.FromAddress&lt;Actor&gt;(ptr);
+MagicTarget mt = actor;
+mt.Equals(actor) // true
+mt = mt.As&lt;MagicTarget&gt;();
+mt.Equals(actor) // false
+mt = mt.As&lt;Actor&gt;()
+mt.Equals(actor) // true</code></pre>
+<h2 class="fw-bolder">Что такое события?</h2>
+<p>События — это нативные перехватчики кода, которые были модернизированы таким образом, что несколько плагинов могут регистрироваться или отменять регистрацию для них. В Skyrim Special Edition события можно найти в классе NetScriptFramework.Skyrim.Events. Давайте посмотрим на событие OnUpdateCamera в качестве примера и создадим быстрый скрипт, чтобы, когда пользователь удерживал кнопку G, положение и поворот камеры устанавливались на голову персонажа игрока:</p>
+<pre><code class="cs">protected override bool Initialize(bool loadedAny)
+{
+    // Register for the event in Initialize.
+    // See intellisense documentation for more information about the Register method and what its arguments do!
+    Skyrim.Events.OnUpdateCamera.Register(OnUpdateCamera_Handler, 1000, 0, 0, EventRegistrationFlags.None);
+    return true;
+}
+
+private void OnUpdateCamera_Handler(NetScriptFramework.Skyrim.UpdateCameraEventArgs e)
+{
+    // The user is not holding the G button, no need to overwrite anything.
+    if (!Tools.Input.IsPressed(Tools.VirtualKeys.G))
+        return;
+
+    // Get camera from event arguments.
+    NetScriptFramework.Skyrim.TESCamera camera = e.Camera;
+    if (camera == null)
+        return;
+
+    // See if it's player camera, if not then we don't want to overwrite the position.
+    NetScriptFramework.Skyrim.PlayerCamera playerCamera = camera.As&lt;NetScriptFramework.Skyrim.PlayerCamera&gt;();
+    if (playerCamera == null) // Could be MapCamera or something else.
+        return;
+
+    // Get the node of camera, we will need to modify it.
+    var cameraNode = playerCamera.Node;
+    if (cameraNode == null)
+        return;
+
+    // Get the player character instance.
+    var plr = NetScriptFramework.Skyrim.PlayerCharacter.Instance;
+    if (plr == null)
+        return;
+
+    // The player character root node.
+    var plrRootNode = plr.Node;
+
+    // This maybe possible if player is in loading screen or not in third person?
+    if (plrRootNode == null)
+        return;
+
+    // Get the head node.
+    var headNode = plrRootNode.LookupNodeByName("NPC Head [Head]");
+
+    // Didn't find head node for some reason, lets just use player root node then.
+    if (headNode == null)
+        headNode = plrRootNode;
+
+    // Copy the world location of the player's head node to the local position of the camera node.
+    Memory.WriteBytes(cameraNode.LocalTransform.Address, Memory.ReadBytes(headNode.WorldTransform.Address, MemoryObject.SizeOf&lt;NetScriptFramework.Skyrim.NiTransform&gt;()));
+    // Alternatively could have just set all the fields manually too but that's slower:
+    //cameraNode.LocalTransform.Position.X = headNode.WorldTransform.Position.X;
+    //cameraNode.LocalTransform.Position.Y = headNode.WorldTransform.Position.Y;
+    // ...
+
+    // Now move the node slightly forwards so we aren't inside the player's head. For this we will need to make a NiPoint3 to use as argument:
+    using (var alloc = Memory.Allocate(MemoryObject.SizeOf&lt;NetScriptFramework.Skyrim.NiPoint3&gt;()))
+    {
+        var pt = MemoryObject.FromAddress&lt;NetScriptFramework.Skyrim.NiPoint3&gt;(alloc.Address);
+        pt.X = 0.0f; // Need to set these because the allocation is not guaranteed to be zeroed out!
+        pt.Y = 20.0f;
+        pt.Z = 0.0f;
+        cameraNode.LocalTransform.Translate(pt, cameraNode.LocalTransform.Position);
+    } // At this point the allocation is freed because it is using the IDisposable interface. To create a permanent allocation you can call the Pin() method on the resulting allocation.
+
+    // Update the camera node with the new position and rotation:
+    cameraNode.Update();
+}</code></pre>
+<p>Теперь попробуйте это в игре, если это работает, попробуйте изменить некоторые вещи, чтобы увидеть, что произойдет.</p>
+<h2 class="fw-bolder">Создание собственного события</h2>
+<p>Иногда вам может понадобиться создать собственное событие либо потому, что вы пишете библиотеку типов, либо потому, что вы хотите разрешить другим авторам плагинов использовать ваш плагин в качестве зависимости для перехвата того же кода, что и вы, чтобы они могли использовать ваш плагин. как библиотеку, если они хотят перезаписать некоторые функции.</p>
+<p>Для этого посмотрим, как реализовано событие обновления камеры в библиотеке типов:</p>
+<pre><code class="cs">public class UpdateCameraEventArgs : HookedEventArgs
+{
+    public NetScriptFramework.Skyrim.TESCamera Camera
+    {
+        get;
+        internal set;
+    }
+}
+
+public static NetScriptFramework.Event&lt;UpdateCameraEventArgs&gt; OnUpdateCamera
+{
+    get;
+    internal set;
+}
+
+private static UpdateCameraEventArgs __before_UpdateCamera(NetScriptFramework.CPURegisters ctx)
+{
+    UpdateCameraEventArgs args = new UpdateCameraEventArgs();
+    args.Camera = MemoryObject.FromAddress&lt;NetScriptFramework.Skyrim.TESCamera&gt;(ctx.DI);
+    return args;
+}
+
+// In Initialize:
+OnUpdateCamera = new NetScriptFramework.EventHook&lt;UpdateCameraEventArgs&gt;("UpdateCamera", new NetScriptFramework.EventHookParameters&lt;UpdateCameraEventArgs&gt;(new IntPtr(0x1404F5D9A).FromBase(), 0x5, 0x5, __before_UpdateCamera, null));</code></pre>
+<p>Подробнее о подключении в следующем разделе.</p>
+    <div class="d-flex justify-content-between">
+        <button type="button" class="btn btn btn-dark text-end"><a href="creating_your_first_plugin.html">Назад</a></button>
+        <button type="button" class="btn btn btn-dark text-start"><a href="using_the_framework.html">Вперёд</a></button>
+    </div>
+    </div>
+</body>
+</html>
+
+

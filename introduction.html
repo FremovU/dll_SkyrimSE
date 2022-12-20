@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport"
+          content="width=device-width, user-scalable=no, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0">
+    <meta http-equiv="X-UA-Compatible" content="ie=edge">
+    <title>Введение</title>
+    <link rel="stylesheet" href="styles/vs.css">
+    <script src="highlight.pack.js"></script>
+    <script>hljs.initHighlightingOnLoad();</script>
+    <link href="styles/bootstrap-5.2.3-dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-rbsA2VBKQhggwzxH7pPCaAqO46MgnOM80zW1RWuH61DGLwZJEdK2Kadq2F9CUG65" crossorigin="anonymous">
+    <script src="styles/bootstrap-5.2.3-dist/js/bootstrap.bundle.min.js" integrity="sha384-kenU1KFdBIe4zVF0s0G1M5b4hcpxyD9F7jL+jjXkk+Q2h455rYXK/7HAuoJl+0I4" crossorigin="anonymous"></script>
+</head>
+<body class="bg-secondary text-dark fw-bolder fs-5">
+<div class="container justify-content-center text-start">
+<h1 class="fw-bold text-center">Введение</h1>
+<h2 class="fw-bolder">Что это такое?</h2>
+<p> <span class="fw-bolder">Цель фреймворка</span> — позволить разработчикам создавать моды .DLL или реконструировать двоичный файл самым простым способом. Он содержит методы для редактирования памяти, перехвата нативного кода, загрузки плагинов и написания библиотек типов, что позволяет использовать обычные интерфейсы .NET в качестве оболочек для нативных типов в памяти.</span>
+<h2 class="fw-bolder">Что является частью фреймворка?</h2>
+<p> <span class="fw-bolder">Фреймворк состоит из четырех частей.</span> <br> <p class="fw-bolder">Первая часть</p> Это библиотека DLL времени выполнения, которая смешивает собственный и управляемый код. Он загружается как обычная библиотека C с помощью LoadLibrary. Он инициализирует управляемую часть фреймворка и предоставляет некоторые встроенные вспомогательные функции, которые фреймворк использует для перехвата.</p>
+<p> <span class="fw-bolder">Вторая часть </span> — это сама управляемая структура. Он содержит систему загрузки плагинов, функции, связанные с памятью, и перехват собственного кода. Все плагины должны ссылаться на эту библиотеку и никогда не должны ссылаться на саму среду выполнения.</p>
+<p> <span class="fw-bolder">Третья часть </span> представляет собой библиотеку игровых типов. Он содержит оболочки для типов, которые используют только адрес памяти, чтобы позволить авторам плагинов использовать нативные типы. Библиотека типов не является обязательной и не требуется для работы фреймворка или плагинов.</p>
+<p> <span class="fw-bolder">Последним компонентом </span> являются сами плагины, которые можно использовать для сбора информации о двоичном файле или его модификации.</p>
+<h2 class="fw-bolder text-center">Установка фреймворка</h2>
+<p>Установка для Skyrim Special Edition: <a target="_blank" href="https://www.nexusmods.com/skyrimspecialedition/mods/21294">Перейти</a></p>
+<p>Установка другой игры или приложения, которое не поддерживается, обычно отличается. В настоящее время поддерживаются только 64-битные приложения, но в будущем планируется поддержка 32-битных. Вам нужно будет получить NetScriptFramework.Runtime.dll либо для внедрения, либо для загрузки иным образом в приложение, а затем вызвать функцию void Initialize() в этой DLL (функция экспортируется и может быть найдена с помощью GetProcAddress). Лучше всего загружать DLL до вызова статических конструкторов, теоретически также должна быть возможность загрузить ее после, но это не проверено.</p>
+<h2 class="fw-boldder text-center">Проверяем работает ли</h2>
+<p>Запустите приложение и выйдите из него. Затем найдите файл /Data/NetScriptFramework/NetScriptFramework.log.txt и откройте его. Файл должен содержать:</p>
+<pre><code class="plaintext text-bg-dark text-start">[17 Nov 2018 11:08:35.899] Initializing framework version 1.
+[17 Nov 2018 11:08:35.905] Loaded configuration file.
+[17 Nov 2018 11:08:35.905] Preparing .NET code hooking.
+[17 Nov 2018 11:08:35.910] Loading game library.
+[17 Nov 2018 11:08:35.941] Loaded game library for `The Elder Scrolls V: Skyrim Special Edition` (1).
+[17 Nov 2018 11:08:35.942] Running game version is 1.5.53.0
+[17 Nov 2018 11:08:35.996] Loading plugins.
+[17 Nov 2018 11:08:35.996] Path to plugins: "Data\NetScriptFramework\Plugins".
+[17 Nov 2018 11:08:36.019] Finished loading 0 plugins.
+[17 Nov 2018 11:08:36.019] Finished framework initialization.
+[17 Nov 2018 11:08:48.330] Shutting down framework.
+[17 Nov 2018 11:08:48.330] Shutting down plugins.
+[17 Nov 2018 11:08:48.330] Shutdown complete.</code></pre>
+<p>Путь к файлу журнала и содержимое могут различаться, но в нем должны быть указаны хотя бы некоторые из этих вещей или сообщение об ошибке. Если файл пуст, это означает, что фреймворк вообще не инициализировался, что может означать, что DLL среды выполнения не была загружена или возникла другая ошибка.</p>
+    <div class="d-flex justify-content-between">
+        <button type="button" class="btn btn btn-dark text-end"><a href="index.html">Назад</a></button>
+        <button type="button" class="btn btn btn-dark text-start"><a href="creating_your_first_plugin.html">Вперёд</a></button>
+    </div>
+</div>
+</body>
+</html>
+
